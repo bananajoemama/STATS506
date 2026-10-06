@@ -1,0 +1,376 @@
+---
+title: "STATS 506 - Homework 2"
+author: "Vasantha Eswar"
+date: "9/15/2026"
+format: typst
+---
+
+# Problem 1
+
+```{r setup, message=FALSE, warning=FALSE}
+library(knitr)
+library(dplyr)
+library(microbenchmark)
+```
+
+## Part A
+```{r}
+# 2d step choices right left up down 
+DIRS <- matrix(c(1, 0, -1, 0, 0, 1, 0, -1), ncol = 2, byrow = TRUE)
+
+# checking if inputs are ok
+validate_inputs <- function(n, p) {
+  if (!is.numeric(n) || length(n) != 1 || n < 1 || n != floor(n)) {
+    stop("Input 'n' must be a single integer greater than or equal to 1.")
+  }
+  if (!is.numeric(p) || length(p) != 1 || p < 0 || p > 1) {
+    stop("Input 'p' must be a single numeric probability between 0 and 1.")
+  }
+}
+
+# base simulation function
+momentum_walk <- function(n, p) {
+  validate_inputs(n, p)
+  
+  curr_dir <- sample.int(4, 1)
+  x <- DIRS[curr_dir, 1]
+  y <- DIRS[curr_dir, 2]
+  
+  if (n > 1) {
+    for (i in 2:n) {
+      if (runif(1) >= p) {
+        curr_dir <- sample.int(4, 1)
+      }
+      x <- x + DIRS[curr_dir, 1]
+      y <- y + DIRS[curr_dir, 2]
+    }
+  }
+  
+  return(c(x = x, y = y))
+}
+```
+
+## Part b
+
+### Part B Code
+
+```{r}
+# v1 for loop version 
+momentum_walk1 <- function(n, p) {
+  validate_inputs(n, p)
+  
+  curr_dir <- sample.int(4, 1)
+  x <- DIRS[curr_dir, 1]
+  y <- DIRS[curr_dir, 2]
+  
+  if (n > 1) {
+    for (i in 2:n) {
+      if (runif(1) >= p) {
+        curr_dir <- sample.int(4, 1)
+      }
+      x <- x + DIRS[curr_dir, 1]
+      y <- y + DIRS[curr_dir, 2]
+    }
+  }
+  
+  return(c(x = x, y = y))
+}
+
+# v2 apply family version
+momentum_walk2 <- function(n, p) {
+  validate_inputs(n, p)
+  
+  curr_dir <- sample.int(4, 1)
+  
+  # tracking direction index per step
+  dir_indices <- sapply(seq_len(n), function(i) {
+    if (i > 1) {
+      if (runif(1) >= p) {
+        curr_dir <<- sample.int(4, 1) # changing state outside function with super assignment
+      }
+    }
+    return(curr_dir)
+  })
+  
+  res <- colSums(DIRS[dir_indices, , drop = FALSE])
+  names(res) <- c("x", "y")
+  return(res)
+}
+
+# testing if these functions actually work 
+set.seed(42)
+
+momentum_walk1(10, 0.6)
+momentum_walk2(10, 0.6)
+
+momentum_walk1(1000, 0.6)
+momentum_walk2(1000, 0.6)
+```
+### Part B Written
+
+Executing the momentum random walk simulation yields final spatial coordinates $(x, y)$ that vary across runs due to the stochastic nature of step direction selection. Specifically, four distinct simulation runs produced final coordinates of $(-1, 1)$, $(6, -2)$, $(-66, 68)$, and $(-8, 18)$ relative to the starting origin $(0, 0)$
+
+## Part C
+
+### Part C Code
+
+```{r}
+# testing seed for small walk n = 10 p = 0.6
+set.seed(123)
+walk10_run1 <- momentum_walk1(10, 0.6)
+
+set.seed(123)
+walk10_run2 <- momentum_walk1(10, 0.6)
+
+cat("n = 10 Run 1: ", walk10_run1, "\n")
+cat("n = 10 Run 2: ", walk10_run2, "\n")
+cat("Identical:    ", identical(walk10_run1, walk10_run2), "\n\n")
+
+# testing seed for big walk n = 1000 p = 0.6
+set.seed(123)
+walk1000_run1 <- momentum_walk1(1000, 0.6)
+
+set.seed(123)
+walk1000_run2 <- momentum_walk1(1000, 0.6)
+
+cat("n = 1000 Run 1:", walk1000_run1, "\n")
+cat("n = 1000 Run 2:", walk1000_run2, "\n")
+cat("Identical:     ", identical(walk1000_run1, walk1000_run2), "\n")
+```
+### Part C Written
+
+Setting a constant random seed using set.seed() ensures that pseudo-random number generation is strictly deterministic and repeatable across independent simulation runs. For a short walk of $n = 10$ steps, two consecutive runs produced identical final coordinates of $(1, 7)$. Similarly, for a longer walk of $n = 1000$ steps, both consecutive runs output identical final coordinates of $(-46, -4)$. This confirms that identical seeding forces the simulation algorithm through the exact same sequence of step decisions, guaranteeing full computational reproducibility.
+
+## Part D
+
+### Part D Code
+
+```{r}
+# distance formula helper function 
+calc_distance <- function(pos) sqrt(pos["x"]^2 + pos["y"]^2)
+
+set.seed(2026)
+
+pos_p00 <- momentum_walk1(1000, 0.0)
+pos_p05 <- momentum_walk1(1000, 0.5)
+pos_p09 <- momentum_walk1(1000, 0.9)
+
+dist_p00 <- calc_distance(pos_p00)
+dist_p05 <- calc_distance(pos_p05)
+dist_p09 <- calc_distance(pos_p09)
+
+cat("Distance for p = 0.0:", dist_p00, "\n")
+cat("Distance for p = 0.5:", dist_p05, "\n")
+cat("Distance for p = 0.9:", dist_p09, "\n")
+```
+### Part D Written
+Evaluating the final Euclidean distance from the origin ($d = \sqrt{x^2 + y^2}$) for a single 1,000-step walk shows that higher momentum probabilities ($p$) result in substantially larger final displacements. Specifically, the final distance increased from $8.4853$ at $p = 0.0$, to $59.6154$ at $p = 0.5$, and reached $121.2106$ at $p = 0.9$. Without momentum ($p = 0.0$), frequent random direction changes lead to backtracking that keeps the walker constrained near the origin, whereas higher values of $p$ encourage sustained movement in the current direction, driving the walker significantly farther away.
+
+## Part E
+
+### Part E Code
+
+```{r}
+set.seed(42)
+
+p_values <- c(0, 0.25, 0.5, 0.75, 0.9)
+n_walks <- 1000
+n_steps <- 1000
+
+# monte carlo sim with replicate
+mean_distances <- sapply(p_values, function(p) {
+  distances <- replicate(n_walks, {
+    pos <- momentum_walk1(n_steps, p)
+    sqrt(pos[1]^2 + pos[2]^2)
+  })
+  mean(distances)
+})
+
+mc_summary <- data.frame(
+  p = p_values,
+  mean_distance = mean_distances
+)
+
+kable(mc_summary, digits = 4, caption = "Mean Final Distance vs Momentum Probability p")
+```
+
+### Part E Written
+
+A Monte Carlo simulation across 1,000 replicated walks of 1,000 steps each demonstrates a strong, positive, non-linear relationship between momentum probability $p$ and expected final distance from the origin. As momentum probability increases from $p = 0.00$ to $0.25$, $0.50$, $0.75$, and $0.90$, the mean final distance grows monotonically from $27.7776$ to $37.1247$, $48.7005$, $73.9562$, and $120.9522$ units, respectively. Higher momentum probabilities reduce the likelihood of directional reversals, producing sustained directional drift and expanding the overall spatial dispersion of final positions.
+
+## Part F
+
+```{r}
+set.seed(42)
+
+# benchmark for n = 1000 steps
+bm_1000 <- microbenchmark(
+  Loop_v1  = momentum_walk1(1000, 0.6),
+  Apply_v2 = momentum_walk2(1000, 0.6),
+  times = 50
+)
+
+# benchmark for n = 100000 steps
+bm_100000 <- microbenchmark(
+  Loop_v1  = momentum_walk1(100000, 0.6),
+  Apply_v2 = momentum_walk2(100000, 0.6),
+  times = 10
+)
+
+print(bm_1000)
+print(bm_100000)
+```
+
+### Part F written
+
+Comparing the execution speed of the explicit loop implementation (Loop_v1) against the apply-family implementation (Apply_v2) using microbenchmarking reveals that the explicit loop is consistently faster across both evaluation settings. In the 50-evaluation benchmark, Loop_v1 achieved a lower median runtime of 2.4648 compared to 3.2375 for Apply_v2, along with a lower mean execution time of 3.4179 versus 3.5267. This performance advantage persisted in the larger-scale 10-evaluation benchmark, where Loop_v1 recorded a median runtime of 275.9006 (mean 298.2983) compared to 386.5327 (mean 390.2251) for Apply_v2. While functional apply family methods are often preferred in R for code clarity, base R apply functions internally wrap loops with repeated function call overhead; as a result, a direct, pre-allocated explicit for loop (Loop_v1) executes more efficiently in this scenario.
+
+# Problem 2
+
+## Problem 2 Code
+
+```{r}
+# setting seed for reproducible bus simulation fr
+set.seed(506)
+
+# total simulated days
+n_days <- 10000
+
+# 6 am to 8 am (3 hours): poisson mean 4
+# generating 10,000 x 3 matrix fully vectorized without loops
+p_6_8 <- matrix(rpois(n_days * 3, lambda = 4), nrow = n_days, ncol = 3)
+
+# 9 am (1 hour): normal mean 45 variance 16 (sd = sqrt(16) = 4)
+p_9 <- rnorm(n_days, mean = 45, sd = 4)
+
+# 10 am to 3 pm (6 hours): poisson mean 15
+p_10_3 <- matrix(rpois(n_days * 6, lambda = 15), nrow = n_days, ncol = 6)
+
+# 4 pm (1 hour): normal mean 55 variance 25 (sd = sqrt(25) = 5)
+p_4 <- rnorm(n_days, mean = 55, sd = 5)
+
+# 5 pm to 10 pm (6 hours): poisson mean 9
+p_5_10 <- matrix(rpois(n_days * 6, lambda = 9), nrow = n_days, ncol = 6)
+
+# total passengers per day calculated vectorized across columns no loops
+daily_passengers <- rowSums(p_6_8) + 
+                   p_9 + 
+                   rowSums(p_10_3) + 
+                   p_4 + 
+                   rowSums(p_5_10)
+
+# computing summary statistics ngl
+mean_daily <- mean(daily_passengers)
+sd_daily <- sd(daily_passengers)
+se_daily <- sd_daily / sqrt(n_days)
+
+# 95% confidence interval for mean daily total
+ci_lower <- mean_daily - 1.96 * se_daily
+ci_upper <- mean_daily + 1.96 * se_daily
+
+# displaying monte carlo results table
+sim_results <- data.frame(
+  Metric = c("Simulated Mean Passengers / Day", "Standard Error", "95% CI Lower Bound", "95% CI Upper Bound"),
+  Value = c(round(mean_daily, 2), round(se_daily, 4), round(ci_lower, 2), round(ci_upper, 2))
+)
+
+kable(sim_results, caption = "Monte Carlo Daily Passenger Simulation Summary (10,000 Days)")
+```
+
+## Problem 2 Written
+Monte Carlo simulation conducted over 10,000 simulated days estimates the average daily passenger volume to be 256.1800 passengers per day. The simulation achieves high statistical precision, as indicated by a small standard error of 0.1419. Constructing a 95% confidence interval yields a range from 255.9000 to 256.4600 passengers per day. This narrow interval demonstrates that across a large sample size of simulated days, the expected mean daily passenger load concentrates tightly around approximately 256 passengers with very minimal estimation uncertainty.
+
+# Problem 3
+
+## Part A 
+
+### Part A Code
+```{r}
+library(tidyverse)
+
+# reload raw data
+youtube <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2021/2021-03-02/youtube.csv")
+
+# de-identify by selecting only analysis variables (13 columns total)
+youtube_clean <- youtube %>%
+  select(
+    year, 
+    funny, show_product_quickly, patriotic, celebrity, danger, animals, use_sex,
+    view_count, like_count, dislike_count, favorite_count, comment_count
+  )
+
+# dimensions will now be 247 x 13
+dim(youtube_clean)
+```
+
+### Part A Written
+
+247 Rows and 13 columns
+
+## Part B C D
+
+### Part B C D Code
+
+```{r}
+library(broom)
+
+# part b
+youtube_transformed <- youtube_clean %>%
+  mutate(
+    log_view_count = log(view_count),
+    log_like_count = log(like_count + 1),
+    log_dislike_count = log(dislike_count + 1),
+    log_comment_count = log(comment_count + 1)
+  )
+
+# part c
+characteristics <- c("funny", "show_product_quickly", "patriotic", 
+                     "celebrity", "danger", "animals", "use_sex")
+outcomes <- c("log_view_count", "log_like_count", "log_dislike_count", "log_comment_count")
+
+results <- expand.grid(outcome = outcomes, characteristic = characteristics, stringsAsFactors = FALSE) %>%
+  rowwise() %>%
+  mutate(
+    fit = list(lm(as.formula(paste(outcome, "~", characteristic, "+ year")), data = youtube_transformed)),
+    tidied = list(tidy(fit))
+  ) %>%
+  unnest(tidied) %>%
+  filter(term == paste0(characteristic, "TRUE") | term == characteristic) %>%
+  select(outcome, characteristic, estimate, std.error, statistic, p.value)
+
+print(results, n = 28)
+
+# part d
+df_matrix <- youtube_transformed %>%
+  select(log_view_count, use_sex, year) %>%
+  na.omit()
+
+X <- cbind(Intercept = 1, use_sex = as.numeric(df_matrix$use_sex), year = df_matrix$year)
+y <- df_matrix$log_view_count
+
+# calculate (X^T X)^(-1) X^T y
+beta_hat_matrix <- solve(t(X) %*% X) %*% t(X) %*% y
+
+# compare with lm()
+lm_fit <- lm(log_view_count ~ use_sex + year, data = df_matrix)
+
+cat("Matrix Algebra Estimates:\n")
+print(beta_hat_matrix)
+
+cat("\nlm() Estimates:\n")
+print(coef(lm_fit))
+```
+
+### Part B Written 
+
+Four of the five YouTube engagement metrics require log transformations, while one variable is entirely unsuitable for linear regression. Specifically, view_count, like_count, dislike_count, and comment_count are all heavily right-skewed count variables spanning multiple orders of magnitude, which violates the standard ordinary least squares assumptions of homoscedasticity and normally distributed residuals. Applying a log transformation—specifically $\log(\text{view\_count})$ for views and $\log(1 + \text{count})$ for likes, dislikes, and comments—stabilizes the residual variance and yields symmetrical outcome distributions suitable for linear modeling. Conversely, favorite_count is not appropriate as a response variable because every observation in the dataset equals zero. Because it has zero variance, its total sum of squares is zero, making regression mathematically undefined.
+
+
+### Part C Written
+
+Fitting separate linear regression models for each transformed outcome against each binary characteristic while controlling for continuous year reveals that no single commercial characteristic reaches statistical significance at the $\alpha = 0.05$ significance level. Across all 28 estimated models, every p-value exceeds $0.05$, though the predictor closest to significance is danger for view counts ($p \approx 0.094$) and like counts ($p \approx 0.080$), along with patriotic for dislike counts ($p \approx 0.086$). Regarding directional associations with view counts, the characteristics danger ($\hat{\beta} \approx +0.6684$), funny ($\hat{\beta} \approx +0.5314$), show_product_quickly ($\hat{\beta} \approx +0.2091$), and patriotic ($\hat{\beta} \approx +0.1344$) display positive estimated associations, whereas use_sex ($\hat{\beta} \approx -0.2952$), animals ($\hat{\beta} \approx -0.1742$), and celebrity ($\hat{\beta} \approx -0.0176$) display negative associations. Overall, danger exhibits the largest positive estimated association with YouTube view counts.
+
+
+### Part D Written
+
+Calculating the ordinary least squares regression coefficients via matrix algebra requires constructing an $n \times 3$ design matrix $\mathbf{X}$ containing a vector of ones for the intercept $\beta_0$, the binary indicator vector $X$ for the selected commercial characteristic, and the continuous vector for year. Evaluating the analytical matrix formula $\hat{\boldsymbol{\beta}} = (\mathbf{X}^T \mathbf{X})^{-1} \mathbf{X}^T \mathbf{y}$ where $Y = \log(\text{view\_count})$ yields an estimated intercept of $-10.96161337$, a characteristic slope estimate of $-0.29516669$ for use_sex (or $+0.66843693$ if selected for danger), and a coefficient of $+0.01063281$ for year. Comparing these matrix calculation results directly to the output produced by R's standard lm() function confirms that both methods yield identical estimated regression coefficients up to machine numerical precision.
