@@ -5,7 +5,8 @@ date: "9/15/2026"
 format: typst
 ---
 
-[GitHub Repository](https://github.com/bananajoemama/STATS506)
+[GitHub Repository]
+https://github.com/bananajoemama/STATS506
 
 # Problem 1 - Exploratory Analysis of Soybean Cultivars
 
