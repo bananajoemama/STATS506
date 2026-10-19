@@ -1,0 +1,477 @@
+---
+title: "STATS 506 - Homework 3"
+author: "Vasantha Eswar"
+date: "10/18/2026"
+format: typst
+---
+
+[GitHub Repository]
+https://github.com/bananajoemama/STATS506
+
+
+# Problem 1
+
+## Part A
+
+```{r}
+library(haven)
+library(dplyr)
+
+# read xpt
+aux  <- read_xpt("AUX_I.xpt") 
+demo <- read_xpt("DEMO_I.xpt")
+
+# merge on seqn
+merged_df <- inner_join(demo, aux, by = "SEQN")
+
+# output merged dim
+cat("Merged Dataset Dimensions:\n")
+cat("Rows (Observations):", nrow(merged_df), "\n")
+cat("Columns (Variables):", ncol(merged_df), "\n")
+```
+## Part B
+
+### Part B Code
+
+```{r}
+library(dplyr)
+
+cleaned_df <- merged_df %>%
+  # req cols
+  select(
+    SEQN,
+    gender = RIAGENDR,
+    citizenship = DMDCITZN,
+    num_children = DMDHHSZA,
+    income_raw = INDHHIN2,
+    width_right = AUXTWIDR,
+    width_left = AUXTWIDL
+  ) %>%
+  mutate(
+    # factor gender
+    gender = factor(gender, levels = c(1, 2), labels = c("Male", "Female")),
+    
+    # citizenship- 7 (ref) & 9 (dk) -> NA
+    citizenship = ifelse(citizenship %in% c(7, 9), NA, citizenship),
+    citizenship = factor(citizenship, levels = c(1, 2), labels = c("Citizen", "Non-Citizen")),
+    
+    # children- all numeric valid
+    num_children = ifelse(num_children %in% c(77, 99), NA, as.numeric(num_children)),
+    
+    # income
+    # 77/99/12/13 mapped to NA
+    income_continuous = case_when(
+      income_raw == 1  ~ 2.5,   # $0 - $4,999
+      income_raw == 2  ~ 7.5,   # $5,000 - $9,999
+      income_raw == 3  ~ 12.5,  # $10,000 - $14,999
+      income_raw == 4  ~ 17.5,  # $15,000 - $19,999
+      income_raw == 5  ~ 22.5,  # $20,000 - $24,999
+      income_raw == 6  ~ 30.0,  # $25,000 - $34,999
+      income_raw == 7  ~ 40.0,  # $35,000 - $44,999
+      income_raw == 8  ~ 50.0,  # $45,000 - $54,999
+      income_raw == 9  ~ 60.0,  # $55,000 - $64,999
+      income_raw == 10 ~ 70.0,  # $65,000 - $74,999
+      income_raw == 14 ~ 87.5,  # $75,000 - $99,999
+      income_raw == 15 ~ 125.0, # $100,000 and Over
+      TRUE ~ NA_real_
+    ),
+    
+    # all valid counts
+    width_right = as.numeric(width_right),
+    width_left  = as.numeric(width_left)
+  )
+```
+
+### Part B Writeup
+
+Category codes 12 ("$20,000 and Over") and 13 ("Under $20,000") in INDHHIN2 break the ordinal sequence because they sit numerically between $65,000–$74,999 (code 10) and $75,000–$99,999 (code 14). They also represent broad lump-sum categories rather than narrow brackets. To model income continuously, I set codes 12, 13, 77, and 99 to NA, and the remaining income brackets were mapped to their numerical midpoints in thousands.
+
+## Part C Poisson Table
+
+```{r}
+library(knitr)
+library(broom)
+
+# model fits
+m1R <- glm(width_right ~ gender, 
+           data = cleaned_df, family = poisson(link = "log"))
+
+m2R <- glm(width_right ~ gender + citizenship + num_children + income_continuous, 
+           data = cleaned_df, family = poisson(link = "log"))
+
+m1L <- glm(width_left ~ gender, 
+           data = cleaned_df, family = poisson(link = "log"))
+
+m2L <- glm(width_left ~ gender + citizenship + num_children + income_continuous, 
+           data = cleaned_df, family = poisson(link = "log"))
+
+# get irr, n, pseudo-R2, aic
+get_model_summary <- function(model, model_name) {
+  # coeff and irrs (exp(beta))
+  coef_df <- tidy(model, exponentiate = TRUE, conf.int = TRUE) %>%
+    mutate(
+      IRR_CI = sprintf("%.3f (%.3f, %.3f)", estimate, conf.low, conf.high),
+      p.value = ifelse(p.value < 0.001, "< 0.001", sprintf("%.3f", p.value))
+    ) %>%
+    select(term, IRR_CI, p.value)
+  
+  # statistics lol
+  n_obs <- nobs(model)
+  pseudo_r2 <- 1 - (model$deviance / model$null.deviance)
+  aic_val <- AIC(model)
+  
+  list(coefs = coef_df, n = n_obs, pseudo_r2 = pseudo_r2, aic = aic_val)
+}
+
+# stargazer from assignment
+library(stargazer)
+
+# pseudor2
+pr2_1R <- sprintf("%.4f", 1 - (m1R$deviance / m1R$null.deviance))
+pr2_2R <- sprintf("%.4f", 1 - (m2R$deviance / m2R$null.deviance))
+pr2_1L <- sprintf("%.4f", 1 - (m1L$deviance / m1L$null.deviance))
+pr2_2L <- sprintf("%.4f", 1 - (m2L$deviance / m2L$null.deviance))
+
+#stargazer table
+stargazer(m1R, m2R, m1L, m2L,
+          type = "text", 
+          apply.coef = exp,
+          ci = TRUE,
+          title = "Poisson Regression Models: Incidence Risk Ratios (IRR)",
+          column.labels = c("Model 1R", "Model 2R", "Model 1L", "Model 2L"),
+          covariate.labels = c("Gender: Female",
+                              "Citizenship: Non-Citizen",
+                              "Num Children <= 5",
+                              "Annual Income ($10k)"),
+          keep.stat = c("n", "aic"),
+          add.lines = list(c("McFadden Pseudo-R2", pr2_1R, pr2_2R, pr2_1L, pr2_2L)))
+```
+
+## Part D
+
+### Part D Code
+
+```{r}
+library(emmeans)
+
+# irr diff
+m2L_sum    <- summary(m2L)
+gender_row <- m2L_sum$coefficients["genderFemale", ]
+
+irr_val   <- exp(gender_row["Estimate"])
+irr_ci    <- exp(confint(m2L)["genderFemale", ])
+z_stat_1  <- gender_row["z value"]
+p_val_1   <- gender_row["Pr(>|z|)"]
+
+cat("Incidence Risk Ratio (IRR) Test\n")
+cat(sprintf("IRR (Female vs Male): %.4f\n", irr_val))
+cat(sprintf("95%% CI: (%.4f, %.4f)\n", irr_ci[1], irr_ci[2]))
+cat(sprintf("z-statistic: %.3f\n", z_stat_1))
+cat(sprintf("p-value: %.5e\n\n", p_val_1))
+
+
+# pred val diff
+# response emm
+emm_gender <- emmeans(m2L, ~ gender, type = "response")
+
+# test
+emm_diff <- contrast(emm_gender, method = "pairwise")
+
+cat("Pairwise Contrast Test of Predicted Values\n")
+print(emm_gender)
+cat("\nContrast Result:\n")
+print(summary(emm_diff))
+```
+### Part D Writeup
+
+To check for differences between males and females in left ear tympanometric width, I ran two tests using Model 2L. First, I tested whether there was a significant difference in terms of the Incidence Risk Ratio (IRR). My null hypothesis was $H_0: \text{IRR}_{\text{Female}} = 1$ (no difference in relative rate between genders), and the alternative was $H_1: \text{IRR}_{\text{Female}} \neq 1$. Model 2L gave an IRR of $1.0189$ for females relative to males, with a 95% confidence interval of $(1.0118, 1.0262)$, a $z$-statistic of $5.215$, and a $p$-value of $1.84 \times 10^{-7}$. Since the $p$-value is way below $0.05$ and the confidence interval doesn't include $1.00$, I rejected the null hypothesis. This means that after controlling for citizenship status, the number of kids aged 5 or under in the household, and annual household income, females have a statistically significant $1.89\%$ higher expected tympanometric width in the left ear compared to males ($p < 0.0001$).
+
+Second, I tested whether the actual predicted values of left ear tympanometric width differed between men and women on the millimeter scale. Here, the null hypothesis was $H_0: \hat{\mu}_{\text{Female}} - \hat{\mu}_{\text{Male}} = 0$ (no difference in predicted mean width), and the alternative was $H_1: \hat{\mu}_{\text{Female}} - \hat{\mu}_{\text{Male}} \neq 0$. Averaging across the other covariates, the model predicted a mean left ear width of 84.8 mm for males and 86.4 mm for females. The contrast test showed a statistically significant difference of 1.6 mm ($z = -5.215$, $p < 0.0001$). Based on these results, I rejected the null hypothesis once again. Holding citizenship, number of young children, and household income constant, women are predicted to have a left ear tympanometric width that is about 1.6 mm wider than men on average.
+
+
+# Problem 2
+
+## Problem 2 data
+
+```{r}
+library(DBI)
+library(RSQLite)
+library(dplyr)
+library(microbenchmark)
+
+# database
+con <- dbConnect(RSQLite::SQLite(), "sakila_master.db")
+```
+
+## Part A Customer Counts
+
+```{r}
+# table
+a_r_approach <- function() {
+  customer_df <- dbReadTable(con, "customer")
+  
+  customer_df %>%
+    group_by(store_id) %>%
+    summarize(
+      total_customers = n(),
+      pct_active = mean(active == 1) * 100,
+      .groups = "drop"
+    )
+}
+
+# sql
+a_sql_approach <- function() {
+  dbGetQuery(con, "
+    SELECT 
+      store_id,
+      COUNT(*) AS total_customers,
+      AVG(active) * 100.0 AS pct_active
+    FROM customer
+    GROUP BY store_id
+  ")
+}
+
+# comparison
+bm_a <- microbenchmark(
+  R_Approach   = a_r_approach(),
+  SQL_Approach = a_sql_approach(),
+  times = 100
+)
+
+print(bm_a)
+```
+
+```{r}
+a_sql_approach()
+```
+
+
+## Part B names and countries
+
+```{r}
+#table
+b_r_approach <- function() {
+  staff   <- dbReadTable(con, "staff")
+  address <- dbReadTable(con, "address")
+  city    <- dbReadTable(con, "city")
+  country <- dbReadTable(con, "country")
+  
+  staff %>%
+    inner_join(address, by = "address_id") %>%
+    inner_join(city, by = "city_id") %>%
+    inner_join(country, by = "country_id") %>%
+    select(first_name, last_name, country)
+}
+
+# sql
+b_sql_approach <- function() {
+  dbGetQuery(con, "
+    SELECT 
+      s.first_name,
+      s.last_name,
+      co.country
+    FROM staff s
+    JOIN address a  ON s.address_id = a.address_id
+    JOIN city ci    ON a.city_id = ci.city_id
+    JOIN country co ON ci.country_id = co.country_id
+  ")
+}
+
+# comparison
+bm_b <- microbenchmark(
+  R_Approach   = b_r_approach(),
+  SQL_Approach = b_sql_approach(),
+  times = 100
+)
+
+print(bm_b)
+```
+
+```{r}
+b_sql_approach()
+```
+
+
+## Part C film
+
+```{r}
+#tables
+c_r_approach <- function() {
+  film      <- dbReadTable(con, "film")
+  inventory <- dbReadTable(con, "inventory")
+  rental    <- dbReadTable(con, "rental")
+  payment   <- dbReadTable(con, "payment")
+  
+  film %>%
+    inner_join(inventory, by = "film_id") %>%
+    inner_join(rental, by = "inventory_id") %>%
+    inner_join(payment, by = "rental_id") %>%
+    group_by(film_id, title) %>%
+    summarize(total_dollar_value = sum(amount), .groups = "drop") %>%
+    filter(total_dollar_value == max(total_dollar_value)) %>%
+    select(title, total_dollar_value)
+}
+
+# sql
+c_sql_approach <- function() {
+  dbGetQuery(con, "
+    WITH film_revenue AS (
+      SELECT 
+        f.film_id,
+        f.title,
+        SUM(p.amount) AS total_dollar_value
+      FROM film f
+      JOIN inventory i ON f.film_id = i.film_id
+      JOIN rental r    ON i.inventory_id = r.inventory_id
+      JOIN payment p   ON r.rental_id = p.rental_id
+      GROUP BY f.film_id, f.title
+    )
+    SELECT title, total_dollar_value
+    FROM film_revenue
+    WHERE total_dollar_value = (
+      SELECT MAX(total_dollar_value) FROM film_revenue
+    )
+  ")
+}
+
+# comparison
+bm_c <- microbenchmark(
+  R_Approach   = c_r_approach(),
+  SQL_Approach = c_sql_approach(),
+  times = 100
+)
+
+print(bm_c)
+```
+
+```{r}
+c_sql_approach()
+```
+
+## Problem 2 Writeup
+
+Based on my results, Store 1 has 326 total customers (97.55% active) while Store 2 has 273 total customers (97.44% active); the system's two staff members are Mike Hillyer in Canada and Jon Stephens in Australia; and the film rented for the highest dollar value is TELEGRAPH VOYAGE at $231.73 in total revenue. Across all three benchmarking tests, the single SQL query approach consistently outperformed pulling raw tables into R for dplyr processing, and I think it's because performing aggregations and joins within the database engine minimizes memory and data transfer time.
+
+
+# Problem 3
+
+## Problem 3 Code
+
+```{r}
+library(tidyverse)
+
+# data
+au_data <- read_csv("au-500.csv")
+
+# part a
+pct_com <- mean(str_detect(au_data$web, "\\.com$")) * 100
+
+cat(sprintf("Part a: %.2f%% of the websites are .com's.\n\n", pct_com))
+
+
+# part b
+email_domains <- str_extract(au_data$email, "(?<=@).*")
+
+# freq
+domain_counts <- table(email_domains)
+most_common_domain <- names(which.max(domain_counts))
+most_common_count <- max(domain_counts)
+
+cat(sprintf("Part b: The most common domain is '%s' (appears %d times).\n\n", 
+            most_common_domain, most_common_count))
+
+
+# part c
+# no commas and whitespace
+company_clean_1 <- str_remove_all(au_data$company_name, "[,\\s]")
+prop_non_alpha_1 <- mean(str_detect(company_clean_1, "[^a-zA-Z]"))
+
+# no commas, whitespace, ampersands (&)
+company_clean_2 <- str_remove_all(au_data$company_name, "[,\\s&]")
+prop_non_alpha_2 <- mean(str_detect(company_clean_2, "[^a-zA-Z]"))
+
+cat(sprintf("Part c (excluding commas/whitespace): %.4f (or %.2f%%)\n", 
+            prop_non_alpha_1, prop_non_alpha_1 * 100))
+cat(sprintf("Part c (also excluding ampersands): %.4f (or %.2f%%)\n\n", 
+            prop_non_alpha_2, prop_non_alpha_2 * 100))
+
+
+# part d
+format_as_cell <- function(phone_vector) {
+  # 1. Strip out all non-numeric characters
+  digits_only <- str_replace_all(phone_vector, "\\D", "")
+  # 2. Reformat into 4 digits - 3 digits - 3 digits
+  str_replace(digits_only, "(\\d{4})(\\d{3})(\\d{3})", "\\1-\\2-\\3")
+}
+
+# apply to both phone columns
+au_data_formatted <- au_data %>%
+  mutate(
+    phone1_cell = format_as_cell(phone1),
+    phone2_cell = format_as_cell(phone2)
+  )
+
+# display first 10 phone numbers of each column
+cat("Part d: First 10 formatted phone numbers:\n")
+print(head(au_data_formatted %>% select(phone1_cell, phone2_cell), 10))
+
+
+# part e
+# extr any sequence of digits sitting at the end of the address string
+apt_numbers <- au_data$address %>%
+  str_extract("\\d+$") %>%
+  as.numeric()
+
+# keep non-NA apartment numbers
+valid_apts <- apt_numbers[!is.na(apt_numbers)]
+
+# histogram of log-transformed apartment numbers
+hist(log(valid_apts),
+     main = "Histogram of Log(Apartment Numbers)",
+     xlab = "log(Apartment Number)",
+     col = "lightblue",
+     border = "white")
+
+
+# part f
+# get leading (first) digit of each apartment number
+leading_digits <- as.numeric(substr(as.character(valid_apts), 1, 1))
+
+# proportions
+obs_dist <- prop.table(table(factor(leading_digits, levels = 1:9)))
+
+# benford's Law distribution: P(d) = log10(1 + 1/d)
+benford_dist <- log10(1 + 1 / (1:9))
+
+# comparison
+benford_comp <- data.frame(
+  Digit = 1:9,
+  Observed_Proportion = as.numeric(obs_dist),
+  Benford_Expected = benford_dist
+)
+
+print(benford_comp)
+```
+
+## Problem 3 Writeup
+
+### Part A
+
+Searching specifically for website URLs that end strictly in .com (using the regular expression \.com$) yields a proportion of 0.00%. In this Australian dataset, web addresses utilize top-level domains like .com.au or .net.au rather than bare .com domains.
+
+### Part B
+
+Extracting the domain portion following the @ symbol across all 500 email records shows that hotmail.com is the most common email domain, appearing 114 times in the dataset.
+
+
+### Part C
+
+When removing commas and whitespace from company_name, 9.00% (proportion of 0.0900) of company names contain at least one non-alphabetic character. When ampersands (&) are also removed, this proportion drops to 0.80% (proportion of 0.0080). This indicates that the vast majority of non-alphabetic characters in company names were ampersands (e.g., "Smith & Sons").
+
+### Part D
+
+Both phone1 and phone2 columns were standardized by removing all non-numeric characters and re-stitching the 10 remaining digits into the standard cell phone pattern (XXXX-XXX-XXX) using regular expressions. The first 10 rows demonstrate that all landlines (such as 0381-749-123) and cell numbers (such as 0458-665-290) now follow a consistent 10-digit format.
+
+### Part F
+
+Under Benford's Law, naturally occurring numerical data should feature 1 as the leading digit approximately 30.10% of the time, decaying down to 4.58% for 9. In this dataset, the leading digit 1 appears in only 9.23% of apartment numbers, whereas 9 appears 14.62% of the time. Because the observed leading digits are distributed almost uniformly across 1 through 9 rather than following a logarithmic decay, the apartment numbers fail Benford's Law and wouldn't pass as naturally occurring data.
