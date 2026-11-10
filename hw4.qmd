@@ -1,0 +1,414 @@
+---
+title: "STATS 506 - Homework 4"
+author: "Vasantha Eswar"
+date: "10/18/2026"
+format: typst
+---
+
+[GitHub Repository]
+https://github.com/bananajoemama/STATS506
+
+# Problem 1
+
+## Load
+
+```{r}
+library(tidyverse)
+library(knitr)
+
+# load
+nzge <- readRDS("nzge.rds")
+
+# structure
+glimpse(nzge)
+head(nzge)
+```
+
+## Part A
+
+```{r}
+votes_by_year_type <- nzge %>%
+  group_by(election_year, voting_type) %>%
+  summarise(total_votes = sum(votes, na.rm = TRUE), .groups = "drop") %>%
+  arrange(desc(total_votes))
+
+votes_by_year_type %>%
+  kable(
+    col.names = c("Election Year", "Vote Type", "Total Votes"),
+    format.args = list(big.mark = ","),
+    caption = "Total Votes by Election Year and Vote Type"
+  )
+```
+
+
+## Part B
+
+```{r}
+candidate_2014 <- nzge %>%
+  filter(election_year == 2014, voting_type == "Candidate") %>%
+  group_by(party) %>%
+  summarise(total_votes = sum(votes, na.rm = TRUE), .groups = "drop") %>%
+  mutate(proportion = total_votes / sum(total_votes)) %>%
+  arrange(desc(proportion))
+
+candidate_2014 %>%
+  mutate(percent = scales::percent(proportion, accuracy = 0.01)) %>%
+  select(party, total_votes, percent) %>%
+  kable(
+    col.names = c("Party", "Votes", "Percent of Vote"),
+    format.args = list(big.mark = ","),
+    caption = "2014 Candidate Vote Share by Party"
+  )
+```
+
+
+## Part C
+
+```{r}
+winners <- nzge %>%
+  group_by(election_year, voting_type, party) %>%
+  summarise(total_votes = sum(votes, na.rm = TRUE), .groups = "drop") %>%
+  group_by(election_year, voting_type) %>%
+  slice_max(total_votes, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  select(election_year, voting_type, party) %>%
+  pivot_wider(names_from = voting_type, values_from = party) %>%
+  arrange(election_year)
+
+winners %>%
+  kable(
+    col.names = c("Election Year", "Candidate Vote Winner", "Party Vote Winner"),
+    caption = "Winning Party by Vote Type and Year"
+  )
+```
+
+
+# Problem 2
+
+## Load
+
+```{r}
+library(tidyverse)
+library(infer) # hypothesis testing
+
+# load
+atp_2019 <- read_csv("atp_matches_2019.csv")
+```
+
+## Part A
+
+### Part A Code
+
+```{r}
+# unique tournaments across all levels (inc davis cup ties)
+total_tournaments <- atp_2019 %>%
+  summarise(n_tournaments = n_distinct(tourney_id))
+
+total_tournaments
+
+# tourney_level
+tournaments_by_level <- atp_2019 %>%
+  group_by(tourney_level) %>%
+  summarise(n_tournaments = n_distinct(tourney_id), .groups = "drop")
+
+tournaments_by_level
+```
+
+
+### Part A Answer
+
+128 tournaments took place in 2019. 
+
+## Part B
+
+### Part B Code
+
+```{r}
+# players w more than one win
+multi_title_winners <- atp_2019 %>%
+  filter(round == "F") %>%
+  group_by(winner_name) %>%
+  summarise(titles_won = n(), .groups = "drop") %>%
+  filter(titles_won > 1) %>%
+  arrange(desc(titles_won))
+
+multi_title_winners
+```
+
+
+### Part B Answer
+
+There were 12 players that won more than one tournament. The most successful players were Novak Djokovic and Dominic Thiem, who tied for the most tournament titles with 5 titles each (followed by Rafael Nadal, Roger Federer, and Daniil Medvedev with 4 titles each).
+
+
+## Part C
+
+## Part C Code
+
+```{r}
+# ace stats
+ace_summary <- atp_2019 %>%
+  drop_na(w_ace, l_ace) %>%
+  summarise(
+    mean_winner_aces = mean(w_ace),
+    mean_loser_aces = mean(l_ace),
+    diff_in_means = mean(w_ace - l_ace),
+    n_matches = n()
+  )
+
+ace_summary
+
+# hypothesis test w infer
+ace_diff_data <- atp_2019 %>%
+  drop_na(w_ace, l_ace) %>%
+  mutate(ace_diff = w_ace - l_ace)
+
+# t-statistic
+obs_stat <- ace_diff_data %>%
+  specify(response = ace_diff) %>%
+  hypothesize(null = "point", mu = 0) %>%
+  calculate(stat = "t")
+
+# tidy hypothesis test using broom
+tidy_test_result <- ace_diff_data %>%
+  summarise(
+    test = list(broom::tidy(t.test(ace_diff, mu = 0, alternative = "greater")))
+  ) %>%
+  unnest(test)
+
+tidy_test_result
+```
+
+### Part C Answer
+
+Yes, there is evidence that match winners hit significantly more aces than losers ($p < 0.001$).
+
+On average, match winners hit ~6.86 aces per match compared to ~4.78 aces for losers, representing a mean difference of +2.08 aces per match ($t \approx 13.5, p < 2.2 \times 10^{-16}$).
+
+
+## Part D
+
+### Part D Code
+
+```{r}
+# wins
+wins_df <- atp_2019 %>%
+  group_by(player_name = winner_name) %>%
+  summarise(wins = n(), .groups = "drop")
+
+# losses
+losses_df <- atp_2019 %>%
+  group_by(player_name = loser_name) %>%
+  summarise(losses = n(), .groups = "drop")
+
+# win-rate + filter for >= 5 matches
+win_rates <- full_join(wins_df, losses_df, by = "player_name") %>%
+  mutate(
+    wins = replace_na(wins, 0),
+    losses = replace_na(losses, 0),
+    total_matches = wins + losses,
+    win_rate = wins / total_matches
+  ) %>%
+  filter(total_matches >= 5) %>%
+  arrange(desc(win_rate), desc(wins))
+
+head(win_rates, 10)
+```
+
+
+### Part D Answer
+
+Rafael Nadal achieved the highest win rate in 2019 among all players with at least 5 matches, recording a 89.2% win rate (58 wins, 7 losses out of 65 total matches). After that is Roger Federer (84.1%, 53–10) and Novak Djokovic (83.8%, 57–11).
+
+
+# Problem 3
+
+## Load
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(scales)
+
+# read
+covid_data <- read_csv(
+  "https://raw.githubusercontent.com/nytimes/covid-19-data/refs/heads/master/rolling-averages/us-states.csv",
+  show_col_types = FALSE
+) %>%
+  mutate(date = as.Date(date))
+```
+
+
+## Part A
+
+### Part A Code
+
+```{r}
+# daily national 7-day rolling average of cases
+national_cases <- covid_data %>%
+  group_by(date) %>%
+  summarise(total_cases_avg = sum(cases_avg, na.rm = TRUE), .groups = "drop")
+
+# case traj w key peak annotations
+ggplot(national_cases, aes(x = date, y = total_cases_avg)) +
+  geom_area(fill = "#2b5c8f", alpha = 0.25) +
+  geom_line(color = "#1a365d", linewidth = 0.9) +
+  # major wave annotations
+  annotate("text", x = as.Date("2021-01-15"), y = 260000, label = "Winter '20-'21 (Major)", fontface = "bold", size = 3.2, color = "#9b2c2c") +
+  annotate("text", x = as.Date("2021-09-01"), y = 180000, label = "Delta Surge (Major)", fontface = "bold", size = 3.2, color = "#9b2c2c") +
+  annotate("text", x = as.Date("2022-01-15"), y = 820000, label = "Omicron Wave (Major)", fontface = "bold", size = 3.2, color = "#9b2c2c") +
+  # minor wave annotations
+  annotate("text", x = as.Date("2020-04-15"), y = 60000, label = "Spring '20 (Minor)", size = 2.8, color = "#4a5568") +
+  annotate("text", x = as.Date("2020-07-20"), y = 80000, label = "Summer '20 (Minor)", size = 2.8, color = "#4a5568") +
+  annotate("text", x = as.Date("2022-07-15"), y = 150000, label = "BA.5 Wave (Minor)", size = 2.8, color = "#4a5568") +
+  scale_x_date(date_breaks = "4 months", date_labels = "%b %Y", expand = c(0.01, 0)) +
+  scale_y_continuous(labels = label_comma(), limits = c(0, 900000), expand = c(0, 0)) +
+  labs(
+    title = "U.S. COVID-19 Daily Case Trajectory (7-Day Rolling Average)",
+    subtitle = "Identification of major and minor national epidemiological waves (2020–2023)",
+    x = "Date",
+    y = "Daily New Cases (7-Day Average)",
+    caption = "Source: The New York Times COVID-19 Data Repository"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(color = "gray30", margin = margin(b = 10)),
+    panel.grid.minor = element_blank(),
+    axis.title.x = element_text(margin = margin(t = 8)),
+    axis.title.y = element_text(margin = margin(r = 8))
+  )
+```
+
+### Part A Writeup
+
+The national daily 7-day average case count reveals 3 major spikes and 3 minor spikes.
+
+Major Spikes
+   - Winter 2020–2021 Peak (~250,000 cases/day): Broad pre-vaccine holiday surge.
+   - Late Summer 2021 Delta Surge (~160,000 cases/day): Driven by the heightened transmissibility of the Delta variant
+   - Winter 2021–2022 Omicron Mega-Spike (~800,000+ cases/day): The single largest outbreak of the pandemic, dwarfing all previous records
+  
+Minor Spikes
+   - Spring 2020 Initial Wave (~30,000 cases/day): Concentrated primarily in Northeastern metropolitan areas
+   - Summer 2020 Sunbelt Surge (~65,000 cases/day): Outbreaks across Southern and Western states
+   - Summer 2022 BA.5 Subvariant Wave (~130,000 cases/day): A moderate summer uptick driven by immune-evasive Omicron sublineages
+   
+   
+## Part B
+
+### Part B Code
+
+```{r}
+# mean daily case rate per 100k for 50 U.S. states (excluding territories)
+state_rates <- covid_data %>%
+  filter(state %in% state.name) %>%
+  group_by(state) %>%
+  summarise(overall_avg_rate = mean(cases_avg_per_100k, na.rm = TRUE), .groups = "drop") %>%
+  arrange(desc(overall_avg_rate))
+
+# t3 highest rate states and top 3 lowest rate states
+top_states <- head(state_rates, 3)$state
+bottom_states <- tail(state_rates, 3)$state
+
+comparison_data <- covid_data %>%
+  filter(state %in% c(top_states, bottom_states)) %>%
+  mutate(
+    group = if_else(state %in% top_states, "Highest Overall Case Rates", "Lowest Overall Case Rates"),
+    state = factor(state, levels = c(top_states, bottom_states))
+  )
+
+# comparison of high-rate vs low-rate trajectories
+ggplot(comparison_data, aes(x = date, y = cases_avg_per_100k, color = state)) +
+  geom_line(linewidth = 0.8, alpha = 0.85) +
+  facet_wrap(~ group, ncol = 1, scales = "free_y") +
+  scale_x_date(date_breaks = "4 months", date_labels = "%b %Y", expand = c(0.01, 0)) +
+  scale_color_brewer(palette = "Set1") +
+  labs(
+    title = "COVID-19 Trajectories: Highest vs. Lowest Rate States",
+    subtitle = "7-day average daily cases per 100,000 residents",
+    x = "Date",
+    y = "Cases per 100,000 Residents",
+    color = "State",
+    caption = "Source: The New York Times COVID-19 Data Repository"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    strip.text = element_text(face = "bold", size = 11, color = "white"),
+    strip.background = element_rect(fill = "#2d3748", color = NA),
+    legend.position = "bottom",
+    panel.grid.minor = element_blank()
+  )
+```
+
+### Part B Writeup
+
+Comparing states with the highest overall per-population infection rates (e.g., Alaska, Rhode Island, North Dakota) against those with the lowest (e.g., Hawaii, Vermont, Maine) shows some interesting stuff
+
+   - Peak Amplitude: High-rate states experienced much sharper, extreme spikes (reaching 300 to 500+ daily cases per 100k during the Omicron wave) whereas low-rate states peaked at substantially lower per-capita intensity
+   - Baseline Volatility: Low-rate states maintained prolonged periods of near-zero baseline transmission throughout 2020 and early 2021 due to geographic isolation (e.g., Hawaii) or high early vaccination coverage and public health compliance (e.g., Vermont). Conversely, high-rate states exhibited elevated baseline infection rates even between primary variant waves
+   
+   
+## Part C
+
+### PArt C Code
+
+```{r}
+# early pandemic window (Feb 1, 2020 to May 31, 2020)
+early_data <- covid_data %>%
+  filter(state %in% state.name, date >= "2020-02-01" & date <= "2020-05-31")
+
+# t5 states w peak daily case rate per 100k during sp2020
+top5_early_states <- early_data %>%
+  group_by(state) %>%
+  summarise(max_rate = max(cases_avg_per_100k, na.rm = TRUE), .groups = "drop") %>%
+  arrange(desc(max_rate)) %>%
+  slice_head(n = 5) %>%
+  pull(state)
+
+early_plot_data <- early_data %>%
+  mutate(
+    highlight = if_else(state %in% top5_early_states, state, "Other States"),
+    highlight = factor(highlight, levels = c(top5_early_states, "Other States"))
+  )
+
+# early pandemic wave by state
+ggplot() +
+  # Background states in light gray
+  geom_line(
+    data = filter(early_plot_data, highlight == "Other States"),
+    aes(x = date, y = cases_avg_per_100k, group = state),
+    color = "gray85", linewidth = 0.5, alpha = 0.7
+  ) +
+  # t5 early states
+  geom_line(
+    data = filter(early_plot_data, highlight != "Other States"),
+    aes(x = date, y = cases_avg_per_100k, color = highlight),
+    linewidth = 1.1
+  ) +
+  scale_x_date(date_breaks = "1 month", date_labels = "%b %Y") +
+  scale_color_brewer(palette = "Dark2") +
+  labs(
+    title = "First Five States Impacted Substantially by COVID-19 (Spring 2020)",
+    subtitle = "Daily case rate per 100,000 residents from February through May 2020",
+    x = "Date",
+    y = "Daily Cases per 100,000 Residents",
+    color = "Early Outbreak States",
+    caption = "Source: The New York Times COVID-19 Data Repository"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 13),
+    legend.position = "right",
+    panel.grid.minor = element_blank()
+  )
+```
+
+### Part C Writeup
+
+Based on per-capita daily case acceleration (cases_avg_per_100k) during March–April 2020, the first five states to experience substantial COVID-19 outbreaks were New York, New Jersey, Massachusetts, Louisiana, and Connecticut (or Rhode Island / Michigan, depending on testing availability windows)
+
+   - New York and New Jersey suffered the earliest and steepest surges, peaking at over 45 daily cases per 100k by early April 2020 due to high international travel volume and dense urban infrastructure
+   - Louisiana experienced a rapid early surge fueled by Mardi Gras gatherings in late February 2020
+   - Massachusetts and Connecticut followed immediately behind New York, establishing the Northeast corridor as the primary early epicenter of the pandemic long before significant spread reached Midwestern or Western states
